@@ -28,7 +28,7 @@ ENABLE_UNSAFE_STREAMABLE_HTTP_TRANSPORT=1 PORT=3001 npx mcp-server-kubernetes
 A aplicacao roda localmente via `uv`; o Docker e usado apenas para o banco de dados.
 O MCP Server roda localmente via `npx` expondo transport HTTP, e o LangChain conecta por HTTP (`MCP_SERVER_URL`).
 
-Nao ha testes ou linter configurados ainda.
+Testes: `uv run pytest` (pytest + pytest-asyncio, em `tests/`). Nao ha linter configurado ainda.
 
 ## Arquitetura
 
@@ -38,10 +38,11 @@ O codigo da aplicacao fica em `src/my_agent_app/` e e empacotado via hatchling (
 - **API** (`api/router.py`) — Health check
 - **Interface Web** (`web/router.py`) — Pagina inicial. Templates Jinja2 em `src/my_agent_app/templates/`
 
+- **Collector** (`collector/`) — Coleta periodica de eventos Warning do cluster, iniciada pelo `lifespan` do FastAPI. `client.py` (autenticacao in-cluster/kubeconfig e listagem em `asyncio.to_thread`), `transform.py` (recencia, filtro e contrato de saida; funcoes puras), `handler.py` (`EventHandler`, placeholder que imprime no stdout) e `loop.py` (`EventCollector`: coleta imediata no startup, marca d'agua em memoria e despacho fire-and-forget)
+
 ### Modulos placeholder (a implementar)
 
 - **Agents** (`agents/`) — Agentes LangChain + MCP Server
-- **Collector** (`collector/`) — Loop periodico de coleta de dados
 - **Models** (`models/`) — Modelos SQLAlchemy e queries
 
 ## Variaveis de ambiente
@@ -50,6 +51,7 @@ O codigo da aplicacao fica em `src/my_agent_app/` e e empacotado via hatchling (
 |----------|-----------|--------|
 | `ANTHROPIC_API_KEY` | Chave de API da Anthropic | (obrigatorio) |
 | `DATABASE_URL` | Connection string PostgreSQL async | `postgresql+asyncpg://aiops:aiops123@localhost:5432/aiops_k8s` |
+| `EVENT_COLLECTION_INTERVAL_MINUTES` | Intervalo da coleta de eventos Warning do cluster, em minutos (valor invalido usa o padrao e gera warning) | `3` |
 | `MCP_SERVER_URL` | Endpoint HTTP do MCP Server Kubernetes (via npx) | `http://localhost:3001/mcp` |
 
 ## Infraestrutura (docker-compose)
@@ -60,3 +62,20 @@ O Docker provisiona **apenas o banco de dados** (PostgreSQL + pgAdmin). A aplica
 |---------|-------|-------------|
 | PostgreSQL 17 | 5432 | aiops / aiops123 / aiops_k8s |
 | pgAdmin | 5050 | admin@admin.com / admin123 |
+
+## Acesso ao cluster Kubernetes (coletor de eventos)
+
+O coletor usa a configuracao in-cluster quando disponivel e, caso contrario, o kubeconfig local (`~/.kube/config`). A identidade usada precisa de permissao de `list` em `events` do grupo `events.k8s.io`:
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: aiops-event-reader
+rules:
+  - apiGroups: ["events.k8s.io"]
+    resources: ["events"]
+    verbs: ["list"]
+```
+
+Sem essa permissao o log indica o erro 403 e o loop continua tentando a cada ciclo.

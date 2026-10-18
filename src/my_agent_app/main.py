@@ -1,3 +1,5 @@
+import asyncio
+import contextlib
 import logging
 from contextlib import asynccontextmanager
 
@@ -11,6 +13,7 @@ from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from my_agent_app.api.router import router as api_router
+from my_agent_app.collector.loop import EventCollector
 from my_agent_app.database import get_database_url
 from my_agent_app.web.router import router as web_router
 
@@ -22,8 +25,13 @@ async def lifespan(app: FastAPI):
 
     app.state.sessionmaker = sessionmaker
 
+    collector_task = asyncio.create_task(EventCollector().run())
+
     yield
 
+    collector_task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await collector_task
     await engine.dispose()
 
 
