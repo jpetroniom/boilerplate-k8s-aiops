@@ -14,7 +14,7 @@ def test_max_iterations(monkeypatch, raw, expected):
 
 
 def test_defaults(monkeypatch):
-    for n in ("AGENT_MAX_ITERATIONS", "ANALYSIS_STALE_TIMEOUT_MINUTES", "AGENT_MODEL_NAME", "MCP_SERVER_URL"):
+    for n in ("AGENT_MAX_ITERATIONS", "ANALYSIS_STALE_TIMEOUT_MINUTES", "AGENT_MODEL_NAME", "AGENT_MODEL_PROVIDER", "MCP_SERVER_URL"):
         monkeypatch.delenv(n, raising=False)
     assert a.get_max_iterations() == 25
     assert a.get_stale_timeout_minutes() == 30
@@ -78,3 +78,43 @@ async def test_iteration_limit_ends_gracefully(monkeypatch):
 def test_prompt_contains_events_and_literal_braces():
     p = a.build_prompt([{"uid": "u-123"}])
     assert "u-123" in p and '{"spec":...}' in p and "{events}" not in p
+
+
+@pytest.mark.parametrize(
+    "provider,expected",
+    [(None, "anthropic"), ("gemini", "google_genai"), ("Google", "google_genai"), ("google_genai", "google_genai"), ("anthropic", "anthropic")],
+)
+def test_model_provider(monkeypatch, provider, expected):
+    monkeypatch.delenv("AGENT_MODEL_PROVIDER", raising=False)
+    if provider:
+        monkeypatch.setenv("AGENT_MODEL_PROVIDER", provider)
+    assert a.get_model_provider() == expected
+
+
+@pytest.mark.parametrize("provider,model", [(None, "claude-haiku-4-5"), ("gemini", "gemini-flash-latest")])
+def test_default_model_follows_provider(monkeypatch, provider, model):
+    monkeypatch.delenv("AGENT_MODEL_NAME", raising=False)
+    monkeypatch.delenv("AGENT_MODEL_PROVIDER", raising=False)
+    if provider:
+        monkeypatch.setenv("AGENT_MODEL_PROVIDER", provider)
+    assert a.get_model_name() == model
+
+
+def test_build_model_passes_provider_name_and_retries(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(a, "init_chat_model", lambda name, **kw: seen.update(name=name, **kw) or "m")
+    monkeypatch.setenv("AGENT_MODEL_PROVIDER", "gemini")
+    monkeypatch.setenv("AGENT_MODEL_NAME", "gemini-x")
+    assert a.build_model() == "m"
+    assert seen == {"name": "gemini-x", "model_provider": "google_genai", "max_retries": 3}
+
+
+def test_build_model_builds_real_clients_without_calling_the_api(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
+    monkeypatch.setenv("GOOGLE_API_KEY", "x")
+    monkeypatch.delenv("AGENT_MODEL_NAME", raising=False)
+    monkeypatch.delenv("AGENT_MODEL_PROVIDER", raising=False)
+    assert type(a.build_model()).__name__ == "ChatAnthropic"
+    monkeypatch.setenv("AGENT_MODEL_PROVIDER", "gemini")
+    m = a.build_model()
+    assert type(m).__name__ == "ChatGoogleGenerativeAI" and m.max_retries == 3 and m.model.endswith("gemini-flash-latest")

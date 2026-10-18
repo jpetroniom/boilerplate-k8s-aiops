@@ -49,7 +49,9 @@ O codigo da aplicacao fica em `src/my_agent_app/` e e empacotado via hatchling (
 | `ANTHROPIC_API_KEY` | Chave de API da Anthropic | (obrigatorio) |
 | `DATABASE_URL` | Connection string PostgreSQL async | `postgresql+asyncpg://aiops:aiops123@localhost:5432/aiops_k8s` |
 | `EVENT_COLLECTION_INTERVAL_MINUTES` | Intervalo da coleta de eventos Warning do cluster, em minutos (valor invalido usa o padrao e gera warning) | `3` |
-| `AGENT_MODEL_NAME` | Modelo Claude do agente de analise | `claude-haiku-4-5` |
+| `AGENT_MODEL_PROVIDER` | Provedor do modelo dos agentes: `anthropic` (usa `ANTHROPIC_API_KEY`) ou `gemini` (usa `GOOGLE_API_KEY`, ha cota gratuita) | `anthropic` |
+| `GOOGLE_API_KEY` | Chave de API do Gemini (so com `AGENT_MODEL_PROVIDER=gemini`) | (opcional) |
+| `AGENT_MODEL_NAME` | Modelo dos agentes de analise e correcao | `claude-haiku-4-5` (`gemini-flash-latest` com `gemini`) |
 | `AGENT_MAX_ITERATIONS` | Maximo de chamadas ao modelo por analise (invalido usa o padrao e gera warning) | `25` |
 | `ANALYSIS_STALE_TIMEOUT_MINUTES` | Minutos ate um relatorio `EM_ANALISE` ser marcado `INCOMPLETO` na deduplicacao; manter acima do pior caso de runtime do agente | `30` |
 | `CORRECTION_MAX_ITERATIONS` | Maximo de chamadas ao modelo por correcao (invalido usa o padrao e gera warning) | `25` |
@@ -83,7 +85,7 @@ Sem essa permissao o log indica o erro 403 e o loop continua tentando a cada cic
 
 ## Analise de causa raiz
 
-Cada lote de eventos vira relatorios no PostgreSQL. Fluxo: dedup por `metadata.uid` -> relatorio `EM_ANALISE` -> agente (somente `kubectl_get`, `kubectl_describe` e `kubectl_logs` do MCP) -> um relatorio `COMPLETO` por problema. Falhas (MCP, API do Claude, resposta sem problemas) deixam o relatorio do lote `INCOMPLETO` e nunca chegam ao coletor. Eventos de relatorios `CORRIGIDO` ou `INCOMPLETO` sao reanalisados na recorrencia. Pre-requisitos: `docker compose up -d`, `uv run alembic upgrade head`, MCP Server no ar e `ANTHROPIC_API_KEY`.
+Cada lote de eventos vira relatorios no PostgreSQL. Fluxo: dedup por `metadata.uid` -> relatorio `EM_ANALISE` -> agente (somente `kubectl_get`, `kubectl_describe` e `kubectl_logs` do MCP) -> um relatorio `COMPLETO` por problema. Falhas (MCP, API do Claude, resposta sem problemas) deixam o relatorio do lote `INCOMPLETO` e nunca chegam ao coletor. Eventos de relatorios `CORRIGIDO` ou `INCOMPLETO` sao reanalisados na recorrencia. Pre-requisitos: `docker compose up -d`, `uv run alembic upgrade head`, MCP Server no ar e a chave do provedor (`ANTHROPIC_API_KEY`, ou `GOOGLE_API_KEY` com `AGENT_MODEL_PROVIDER=gemini`). Os PRDs foram escritos para o Claude; outros modelos funcionam, mas a qualidade do diagnostico e o formato da resposta podem variar.
 
 **Seguranca:** a interface web nao tem autenticacao na v1. Restrinja o acesso por rede (VPN, ingress interno); qualquer pessoa com acesso a rede pode disparar correcoes no cluster (PRD 004).
 

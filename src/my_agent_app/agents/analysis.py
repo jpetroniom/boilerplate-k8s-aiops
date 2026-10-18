@@ -4,12 +4,15 @@ import os
 
 from langchain.agents import create_agent
 from langchain.agents.middleware import ModelCallLimitMiddleware
-from langchain_anthropic import ChatAnthropic
+from langchain.chat_models import init_chat_model
 from langchain_mcp_adapters.client import MultiServerMCPClient
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_PROVIDER = "anthropic"
 DEFAULT_MODEL = "claude-haiku-4-5"
+DEFAULT_MODELS = {"anthropic": DEFAULT_MODEL, "google_genai": "gemini-flash-latest"}
+PROVIDER_ALIASES = {"gemini": "google_genai", "google": "google_genai", "google-genai": "google_genai"}
 DEFAULT_MAX_ITERATIONS = 25
 DEFAULT_STALE_TIMEOUT_MINUTES = 30
 DEFAULT_MCP_SERVER_URL = "http://localhost:3001/mcp"
@@ -34,8 +37,13 @@ def _positive_number(name: str, default: float, cast) -> float:
     return value
 
 
+def get_model_provider() -> str:
+    raw = (os.getenv("AGENT_MODEL_PROVIDER") or DEFAULT_PROVIDER).strip().lower()
+    return PROVIDER_ALIASES.get(raw, raw)
+
+
 def get_model_name() -> str:
-    return os.getenv("AGENT_MODEL_NAME") or DEFAULT_MODEL
+    return os.getenv("AGENT_MODEL_NAME") or DEFAULT_MODELS.get(get_model_provider(), DEFAULT_MODEL)
 
 
 def get_max_iterations() -> int:
@@ -148,8 +156,9 @@ def build_agent(model, tools: list, max_iterations: int):
     )
 
 
-def build_model(model_name: str | None = None) -> ChatAnthropic:
-    return ChatAnthropic(model=model_name or get_model_name(), max_retries=3)
+def build_model(model_name: str | None = None):
+    """Modelo do agente. Claude por padrao; AGENT_MODEL_PROVIDER=gemini usa o Gemini (GOOGLE_API_KEY)."""
+    return init_chat_model(model_name or get_model_name(), model_provider=get_model_provider(), max_retries=3)
 
 
 def message_text(message) -> str:
