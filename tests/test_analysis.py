@@ -118,3 +118,43 @@ def test_build_model_builds_real_clients_without_calling_the_api(monkeypatch):
     monkeypatch.setenv("AGENT_MODEL_PROVIDER", "gemini")
     m = a.build_model()
     assert type(m).__name__ == "ChatGoogleGenerativeAI" and m.max_retries == 3 and m.model.endswith("gemini-flash-latest")
+
+
+async def test_mcp_protocol_error_is_returned_to_the_model_as_tool_error():
+    from mcp import McpError
+    from mcp.types import ErrorData
+
+    class Request:
+        name = "kubectl_patch"
+
+    async def handler(request):
+        raise McpError(ErrorData(code=-32600, message="patchData must be a valid JSON object, not a string."))
+
+    result = await a.tolerate_mcp_errors(Request(), handler)
+    assert result.isError is True and "patchData must be a valid JSON object" in result.content[0].text
+
+
+async def test_successful_tool_call_passes_through_the_interceptor():
+    class Request:
+        name = "kubectl_get"
+
+    async def handler(request):
+        return "ok"
+
+    assert await a.tolerate_mcp_errors(Request(), handler) == "ok"
+
+
+async def test_transport_failure_is_not_swallowed_by_the_interceptor():
+    class Request:
+        name = "kubectl_get"
+
+    async def handler(request):
+        raise ConnectionError("servidor fora do ar")
+
+    with pytest.raises(ConnectionError):
+        await a.tolerate_mcp_errors(Request(), handler)
+
+
+def test_default_client_installs_the_interceptor():
+    client = a.build_mcp_client()
+    assert a.tolerate_mcp_errors in client.tool_interceptors

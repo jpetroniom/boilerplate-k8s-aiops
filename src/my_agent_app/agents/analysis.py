@@ -6,6 +6,8 @@ from langchain.agents import create_agent
 from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain.chat_models import init_chat_model
 from langchain_mcp_adapters.client import MultiServerMCPClient
+from mcp import McpError
+from mcp.types import CallToolResult, TextContent
 
 logger = logging.getLogger(__name__)
 
@@ -130,6 +132,26 @@ def build_prompt(events: list[dict]) -> str:
     return PROMPT.replace("{events}", json.dumps(events, ensure_ascii=False, indent=2))
 
 
+async def tolerate_mcp_errors(request, handler):
+    """Devolve ao modelo o erro de protocolo do MCP (ex.: parametros invalidos) para ele tentar de novo.
+
+    O adaptador so devolve ao modelo resultados com isError=True; um McpError (o servidor respondeu com um
+    erro JSON-RPC) subiria e derrubaria a execucao inteira. Falhas de transporte nao sao McpError e continuam
+    abortando a analise.
+    """
+    try:
+        return await handler(request)
+    except McpError as exc:
+        logger.warning("Tool %s rejeitada pelo MCP Server: %s", request.name, exc)
+        return CallToolResult(content=[TextContent(type="text", text=f"Erro da tool {request.name}: {exc}")], isError=True)
+
+
+def build_mcp_client() -> MultiServerMCPClient:
+    return MultiServerMCPClient(
+        {"k8s": {"transport": "http", "url": get_mcp_server_url()}}, tool_interceptors=[tolerate_mcp_errors]
+    )
+
+
 def select_read_tools(tools) -> list:
     """Mantem somente as tools de leitura; aborta se alguma delas nao existir."""
     by_name = {tool.name: tool for tool in tools}
@@ -140,7 +162,7 @@ def select_read_tools(tools) -> list:
 
 
 async def load_read_tools(client=None) -> list:
-    client = client or MultiServerMCPClient({"k8s": {"transport": "http", "url": get_mcp_server_url()}})
+    client = client or build_mcp_client()
     try:
         tools = await client.get_tools()
     except Exception as exc:

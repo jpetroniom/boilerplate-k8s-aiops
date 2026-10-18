@@ -2,14 +2,13 @@ import logging
 import re
 import uuid
 
-from langchain_mcp_adapters.client import MultiServerMCPClient
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from my_agent_app.agents.analysis import (
     _positive_number,
     build_agent,
+    build_mcp_client,
     build_model,
-    get_mcp_server_url,
     message_text,
 )
 from my_agent_app.models import ReportStatus, queries
@@ -111,7 +110,7 @@ def parse_verdict(text: str) -> tuple[ReportStatus, str]:
 
 async def load_all_tools(client=None) -> list:
     """Todas as tools do MCP, inclusive as de escrita (acesso irrestrito na v1, por decisao do PRD)."""
-    client = client or MultiServerMCPClient({"k8s": {"transport": "http", "url": get_mcp_server_url()}})
+    client = client or build_mcp_client()
     try:
         return await client.get_tools()
     except Exception as exc:
