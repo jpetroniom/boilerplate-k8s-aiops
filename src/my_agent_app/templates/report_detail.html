@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+
+{% block title %}Relatório {{ report.id }} - My Agent App{% endblock %}
+
+{% block extra_style %}
+        .detail-header { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; margin-bottom: 1.5rem; }
+        .detail-header h2 { font-size: 1rem; font-family: ui-monospace, monospace; color: #94a3b8; }
+        .detail-header form { margin-left: auto; }
+        .back-link { color: #94a3b8; text-decoration: none; font-size: 0.875rem; }
+        .alert { background: #422006; border: 1px solid #854d0e; color: #fde68a; padding: 0.75rem 1rem; border-radius: 6px; margin-bottom: 1.5rem; }
+        .markdown-body h1 { font-size: 1.5rem; margin: 1.5rem 0 1rem; }
+        .markdown-body h2 { font-size: 1.25rem; margin: 1.5rem 0 0.75rem; padding-bottom: 0.25rem; border-bottom: 1px solid #334155; }
+        .markdown-body h3 { font-size: 1.05rem; margin: 1.25rem 0 0.5rem; color: #cbd5e1; }
+        .markdown-body p, .markdown-body ul, .markdown-body ol { margin-bottom: 0.75rem; }
+        .markdown-body ul, .markdown-body ol { padding-left: 1.5rem; }
+        .markdown-body hr { border: none; border-top: 1px solid #334155; margin: 1.5rem 0; }
+        .markdown-body a { color: #60a5fa; }
+        .markdown-body code { background: #1e293b; padding: 0.1rem 0.35rem; border-radius: 4px; font-size: 0.875rem; }
+        .markdown-body pre { background: #1e293b; padding: 1rem; border-radius: 6px; overflow-x: auto; margin-bottom: 1rem; }
+        .markdown-body pre code { background: none; padding: 0; }
+        .markdown-body table { border-collapse: collapse; margin-bottom: 1rem; }
+        .markdown-body th, .markdown-body td { border: 1px solid #334155; padding: 0.4rem 0.8rem; text-align: left; }
+        .markdown-body th { background: #1e293b; }
+{% endblock %}
+
+{% block content %}
+<a href="/reports" class="back-link">← Relatórios</a>
+{% if message %}<div class="alert" role="alert">{{ message }}</div>{% endif %}
+<div class="detail-header">
+    <h2>{{ report.id }}</h2>
+    <span class="badge {{ report.status | badge_class }}">{{ report.status }}</span>
+    {% if can_fix %}
+    <form method="post" action="/reports/{{ report.id }}/fix">
+        <button type="submit" class="btn btn-primary">Executar correção</button>
+    </form>
+    {% endif %}
+</div>
+<article class="markdown-body">{{ content | safe }}</article>
+{% endblock %}

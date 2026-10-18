@@ -117,3 +117,22 @@ async def test_recover_orphans(sessionmaker):
         assert await q.recover_orphans(s) == 1
     assert await status_of(sessionmaker, orphan) == "INCOMPLETO"
     assert await status_of(sessionmaker, ok) == "COMPLETO"
+
+
+async def test_list_reports_newest_first_and_empty(sessionmaker):
+    async with sessionmaker() as s:
+        assert await q.list_reports(s) == []
+    old = await add(sessionmaker, "COMPLETO", ["a"], age_minutes=60)
+    new = await add(sessionmaker, "INCOMPLETO", ["b"])
+    mid = await add(sessionmaker, "CORRIGIDO", ["c"], age_minutes=30)
+    async with sessionmaker() as s:
+        assert [r.id for r in await q.list_reports(s)] == [new, mid, old]
+
+
+async def test_get_report(sessionmaker):
+    import uuid
+
+    rid = await add(sessionmaker, "COMPLETO", ["a"])
+    async with sessionmaker() as s:
+        assert (await q.get_report(s, rid)).id == rid
+        assert await q.get_report(s, uuid.uuid4()) is None

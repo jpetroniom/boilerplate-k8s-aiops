@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+
+{% block title %}Relatórios - My Agent App{% endblock %}
+
+{% block extra_style %}
+        .report-list { width: 100%; border-collapse: collapse; }
+        .report-list th, .report-list td { text-align: left; padding: 0.75rem 1rem; border-bottom: 1px solid #334155; }
+        .report-list th { color: #94a3b8; font-size: 0.75rem; text-transform: uppercase; }
+        .report-list tbody tr:hover { background: #1e293b; }
+        .report-list a { color: #60a5fa; text-decoration: none; font-family: ui-monospace, monospace; font-size: 0.85rem; }
+        .severity-none { color: #64748b; }
+{% endblock %}
+
+{% block content %}
+<h2 style="margin-bottom: 1.5rem;">Relatórios</h2>
+{% if reports %}
+<table class="report-list">
+    <thead>
+        <tr><th>ID</th><th>Criado em (UTC)</th><th>Status</th><th>Severidade</th></tr>
+    </thead>
+    <tbody>
+    {% for r in reports %}
+        <tr>
+            <td><a href="/reports/{{ r.id }}">{{ r.id }}</a></td>
+            <td>{{ r.created_at.strftime("%d/%m/%Y %H:%M:%S") }}</td>
+            <td><span class="badge {{ r.status | badge_class }}">{{ r.status }}</span></td>
+            <td>{% if r.severity %}{{ r.severity }}{% else %}<span class="severity-none">—</span>{% endif %}</td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<div class="empty-state"><p>Nenhum relatório encontrado</p></div>
+{% endif %}
+{% endblock %}

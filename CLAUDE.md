@@ -38,7 +38,7 @@ O codigo da aplicacao fica em `src/my_agent_app/` e e empacotado via hatchling (
 - **Agents** (`agents/`) — `analysis.py` (config, prompt, tools MCP de leitura, agente `create_agent` + `ModelCallLimitMiddleware`) e `report_parser.py` (Markdown da resposta -> um relatorio por problema)
 - **Database** (`database.py`) — Engine async SQLAlchemy + asyncpg, configurado via `DATABASE_URL`
 - **API** (`api/router.py`) — Health check
-- **Interface Web** (`web/router.py`) — Pagina inicial. Templates Jinja2 em `src/my_agent_app/templates/`
+- **Interface Web** (`web/router.py`, `web/rendering.py`) — Pagina inicial, `GET /reports` (listagem por `created_at` decrescente, com badge de status e severidade lida do Markdown) e `GET /reports/{id}` (UUID; Markdown renderizado e sanitizado com `markdown` + `nh3`; botao "Executar correcao" so para `COMPLETO`/`FALHA_CORRECAO`, que envia `POST /reports/{id}/fix` — rota do PRD 004, ainda nao implementada). `render_report_detail(..., message, status_code)` reexibe o detalhe com uma mensagem (usada pelo PRD 004 no 409). Banco indisponivel responde 503. Templates Jinja2 em `src/my_agent_app/templates/`
 
 - **Collector** (`collector/`) — Coleta periodica de eventos Warning do cluster, iniciada pelo `lifespan` do FastAPI. `client.py` (autenticacao in-cluster/kubeconfig e listagem em `asyncio.to_thread`), `transform.py` (recencia, filtro e contrato de saida; funcoes puras), `handler.py` (`EventHandler`: pipeline de analise do PRD 002 — dedup, relatorio `EM_ANALISE`, agente, relatorios por problema) e `loop.py` (`EventCollector`: coleta imediata no startup, marca d'agua em memoria e despacho fire-and-forget)
 
@@ -83,3 +83,5 @@ Sem essa permissao o log indica o erro 403 e o loop continua tentando a cada cic
 ## Analise de causa raiz
 
 Cada lote de eventos vira relatorios no PostgreSQL. Fluxo: dedup por `metadata.uid` -> relatorio `EM_ANALISE` -> agente (somente `kubectl_get`, `kubectl_describe` e `kubectl_logs` do MCP) -> um relatorio `COMPLETO` por problema. Falhas (MCP, API do Claude, resposta sem problemas) deixam o relatorio do lote `INCOMPLETO` e nunca chegam ao coletor. Eventos de relatorios `CORRIGIDO` ou `INCOMPLETO` sao reanalisados na recorrencia. Pre-requisitos: `docker compose up -d`, `uv run alembic upgrade head`, MCP Server no ar e `ANTHROPIC_API_KEY`.
+
+**Seguranca:** a interface web nao tem autenticacao na v1. Restrinja o acesso por rede (VPN, ingress interno); quando o PRD 004 existir, qualquer pessoa com acesso a rede podera disparar correcoes no cluster.

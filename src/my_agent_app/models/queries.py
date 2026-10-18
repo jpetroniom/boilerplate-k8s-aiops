@@ -81,3 +81,13 @@ async def recover_orphans(session: AsyncSession) -> int:
     )
     await session.commit()
     return result.rowcount
+
+
+async def list_reports(session: AsyncSession) -> list[Report]:
+    """Todos os relatorios, do mais recente para o mais antigo."""
+    result = await session.execute(select(Report).order_by(Report.created_at.desc()))
+    return list(result.scalars())
+
+
+async def get_report(session: AsyncSession, report_id: uuid.UUID) -> Report | None:
+    return await session.get(Report, report_id)
