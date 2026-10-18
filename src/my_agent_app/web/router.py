@@ -2,12 +2,13 @@ import logging
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, Request
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, BackgroundTasks, Depends, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.exc import SQLAlchemyError
 
-from my_agent_app.models import queries
+from my_agent_app.agents.correction import run_correction
+from my_agent_app.models import ReportStatus, queries
 from my_agent_app.web.rendering import FIXABLE_STATUSES, STATUS_BADGES, extract_severity, render_markdown
 
 logger = logging.getLogger(__name__)
@@ -70,6 +71,7 @@ async def render_report_detail(
     context = {
         "report": report,
         "content": render_markdown(report.markdown),
+        "correction_content": render_markdown(report.correction_result) if report.correction_result else None,
         "can_fix": report.status in FIXABLE_STATUSES,
         "message": message,
     }
@@ -79,3 +81,26 @@ async def render_report_detail(
 @router.get("/reports/{report_id}", response_class=HTMLResponse)
 async def report_detail(request: Request, report_id: uuid.UUID, session=Depends(get_session)):
     return await render_report_detail(request, session, report_id)
+
+
+IN_PROGRESS_MESSAGE = "Correção já em andamento"
+NOT_FIXABLE_MESSAGE = "Este relatório não permite correção no status atual"
+
+
+@router.post("/reports/{report_id}/fix")
+async def fix_report(
+    request: Request, report_id: uuid.UUID, background_tasks: BackgroundTasks, session=Depends(get_session)
+):
+    try:
+        if await queries.get_report(session, report_id) is None:
+            return await render_report_detail(request, session, report_id)
+        started = await queries.begin_correction(session, report_id)
+        if not started:
+            session.expire_all()
+            report = await queries.get_report(session, report_id)
+            message = IN_PROGRESS_MESSAGE if report.status == ReportStatus.CORRIGINDO else NOT_FIXABLE_MESSAGE
+            return await render_report_detail(request, session, report_id, message=message, status_code=409)
+    except (SQLAlchemyError, OSError) as exc:
+        return _db_unavailable(request, exc)
+    background_tasks.add_task(run_correction, request.app.state.sessionmaker, report_id)
+    return RedirectResponse(url=f"/reports/{report_id}", status_code=303)

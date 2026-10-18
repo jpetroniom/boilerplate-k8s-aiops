@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -129,3 +130,112 @@ async def test_database_down_is_503(path):
         r = await c.get(path)
     assert r.status_code == 503
     assert "Banco de dados indisponível, tente novamente em instantes" in r.text
+
+
+# --- POST /reports/{id}/fix ---
+
+
+@pytest.fixture
+def fixer(monkeypatch, sessionmaker):
+    """Troca a correcao real por uma falsa que registra as chamadas."""
+    from my_agent_app.agents import correction
+
+    calls = []
+
+    async def fake_correct(md):
+        calls.append(md)
+        await asyncio.sleep(0.05)
+        return "CORRIGIDO: ok"
+
+    async def runner(sm, report_id):
+        await correction.run_correction(sm, report_id, correct_fn=fake_correct)
+
+    monkeypatch.setattr("my_agent_app.web.router.run_correction", runner)
+    return calls
+
+
+async def test_fix_completo_redirects_and_runs_in_background(sessionmaker, client, fixer):
+    rid = await add(sessionmaker, "COMPLETO")
+    r = await client.post(f"/reports/{rid}/fix", follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == f"/reports/{rid}"
+    assert len(fixer) == 1
+    async with sessionmaker() as s:
+        row = await s.get(Report, rid)
+    assert (row.status, row.correction_result) == ("CORRIGIDO", "CORRIGIDO: ok")
+
+
+async def test_fix_status_is_corrigindo_before_response(sessionmaker, client, monkeypatch):
+    rid = await add(sessionmaker, "COMPLETO")
+    seen = {}
+
+    async def runner(sm, report_id):
+        async with sm() as s:
+            seen["status"] = (await s.get(Report, report_id)).status
+
+    monkeypatch.setattr("my_agent_app.web.router.run_correction", runner)
+    await client.post(f"/reports/{rid}/fix")
+    assert seen["status"] == "CORRIGINDO"
+
+
+async def test_fix_after_failure_restarts(sessionmaker, client, fixer):
+    rid = await add(sessionmaker, "FALHA_CORRECAO")
+    assert (await client.post(f"/reports/{rid}/fix")).status_code == 303 and len(fixer) == 1
+
+
+@pytest.mark.parametrize("status", ["EM_ANALISE", "INCOMPLETO", "CORRIGIDO"])
+async def test_fix_invalid_status_is_409_without_running(sessionmaker, client, fixer, status):
+    rid = await add(sessionmaker, status)
+    r = await client.post(f"/reports/{rid}/fix")
+    assert r.status_code == 409 and "não permite correção" in r.text and fixer == []
+
+
+async def test_fix_while_corrigindo_shows_in_progress_message(sessionmaker, client, fixer):
+    rid = await add(sessionmaker, "CORRIGINDO")
+    r = await client.post(f"/reports/{rid}/fix")
+    assert r.status_code == 409 and "Correção já em andamento" in r.text and fixer == []
+    assert "CORRIGINDO" in r.text
+
+
+async def test_fix_unknown_report_is_404(client, fixer):
+    r = await client.post(f"/reports/{uuid.uuid4()}/fix")
+    assert r.status_code == 404 and fixer == []
+
+
+async def test_fix_concurrent_requests_only_one_runs(sessionmaker, fixer):
+    app.state.sessionmaker = sessionmaker
+    rid = await add(sessionmaker, "COMPLETO")
+
+    async def post():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as c:
+            return (await c.post(f"/reports/{rid}/fix")).status_code
+
+    codes = await asyncio.gather(*[post() for _ in range(6)])
+    assert sorted(codes) == [303] + [409] * 5 and len(fixer) == 1
+
+
+async def test_fix_database_down_is_503():
+    app.state.sessionmaker = BrokenMaker()
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as c:
+        assert (await c.post(f"/reports/{uuid.uuid4()}/fix")).status_code == 503
+
+
+async def test_correction_result_section_only_when_present(sessionmaker, client):
+    plain = await add(sessionmaker, "COMPLETO")
+    fixed = await add(sessionmaker, "CORRIGIDO")
+    async with sessionmaker() as s:
+        row = await s.get(Report, fixed)
+        row.correction_result = "CORRIGIDO: ok\n\n## Acoes Executadas\n- **Acao:** patch"
+        await s.commit()
+    assert "Resultado da Correção" not in (await client.get(f"/reports/{plain}")).text
+    text = (await client.get(f"/reports/{fixed}")).text
+    assert "Resultado da Correção" in text and "<h2>Acoes Executadas</h2>" in text and "badge-executed" in text
+
+
+async def test_correction_result_is_sanitized(sessionmaker, client):
+    rid = await add(sessionmaker, "FALHA_CORRECAO")
+    async with sessionmaker() as s:
+        row = await s.get(Report, rid)
+        row.correction_result = 'FALHA: x\n\n<script>alert(1)</script><img src=x onerror="alert(2)">[a](javascript:alert(3))'
+        await s.commit()
+    text = (await client.get(f"/reports/{rid}")).text.lower()
+    assert "<script>alert" not in text and "onerror" not in text and "javascript:" not in text

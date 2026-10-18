@@ -35,10 +35,10 @@ Testes: `uv run pytest` (pytest + pytest-asyncio, em `tests/`). Nao ha linter co
 O codigo da aplicacao fica em `src/my_agent_app/` e e empacotado via hatchling (`pyproject.toml`).
 
 - **Models** (`models/`) — `Report` (tabela `reports`: id UUID, markdown, status, `event_uids TEXT[]` com GIN, timestamps), enum `ReportStatus` e queries async (deduplicacao, relatorio do lote, swap condicional, recuperacao de orfaos). Migrations em `migrations/` (Alembic async)
-- **Agents** (`agents/`) — `analysis.py` (config, prompt, tools MCP de leitura, agente `create_agent` + `ModelCallLimitMiddleware`) e `report_parser.py` (Markdown da resposta -> um relatorio por problema)
+- **Agents** (`agents/`) — `correction.py` (agente de correcao do PRD 004: prompt, `load_all_tools` sem filtro, `parse_verdict` e `run_correction` em background) e `analysis.py` (config, prompt, tools MCP de leitura, agente `create_agent` + `ModelCallLimitMiddleware`) e `report_parser.py` (Markdown da resposta -> um relatorio por problema)
 - **Database** (`database.py`) — Engine async SQLAlchemy + asyncpg, configurado via `DATABASE_URL`
 - **API** (`api/router.py`) — Health check
-- **Interface Web** (`web/router.py`, `web/rendering.py`) — Pagina inicial, `GET /reports` (listagem por `created_at` decrescente, com badge de status e severidade lida do Markdown) e `GET /reports/{id}` (UUID; Markdown renderizado e sanitizado com `markdown` + `nh3`; botao "Executar correcao" so para `COMPLETO`/`FALHA_CORRECAO`, que envia `POST /reports/{id}/fix` — rota do PRD 004, ainda nao implementada). `render_report_detail(..., message, status_code)` reexibe o detalhe com uma mensagem (usada pelo PRD 004 no 409). Banco indisponivel responde 503. Templates Jinja2 em `src/my_agent_app/templates/`
+- **Interface Web** (`web/router.py`, `web/rendering.py`) — Pagina inicial, `GET /reports` (listagem por `created_at` decrescente, com badge de status e severidade lida do Markdown) e `GET /reports/{id}` (UUID; Markdown renderizado e sanitizado com `markdown` + `nh3`; botao "Executar correcao" so para `COMPLETO`/`FALHA_CORRECAO`, que envia `POST /reports/{id}/fix`; a rota valida (404/409), move para `CORRIGINDO` de forma atomica, responde 303 e roda `run_correction` via `BackgroundTasks`; o detalhe exibe o "Resultado da Correcao"). `render_report_detail(..., message, status_code)` reexibe o detalhe com uma mensagem (usada pelo PRD 004 no 409). Banco indisponivel responde 503. Templates Jinja2 em `src/my_agent_app/templates/`
 
 - **Collector** (`collector/`) — Coleta periodica de eventos Warning do cluster, iniciada pelo `lifespan` do FastAPI. `client.py` (autenticacao in-cluster/kubeconfig e listagem em `asyncio.to_thread`), `transform.py` (recencia, filtro e contrato de saida; funcoes puras), `handler.py` (`EventHandler`: pipeline de analise do PRD 002 — dedup, relatorio `EM_ANALISE`, agente, relatorios por problema) e `loop.py` (`EventCollector`: coleta imediata no startup, marca d'agua em memoria e despacho fire-and-forget)
 
@@ -52,6 +52,7 @@ O codigo da aplicacao fica em `src/my_agent_app/` e e empacotado via hatchling (
 | `AGENT_MODEL_NAME` | Modelo Claude do agente de analise | `claude-haiku-4-5` |
 | `AGENT_MAX_ITERATIONS` | Maximo de chamadas ao modelo por analise (invalido usa o padrao e gera warning) | `25` |
 | `ANALYSIS_STALE_TIMEOUT_MINUTES` | Minutos ate um relatorio `EM_ANALISE` ser marcado `INCOMPLETO` na deduplicacao; manter acima do pior caso de runtime do agente | `30` |
+| `CORRECTION_MAX_ITERATIONS` | Maximo de chamadas ao modelo por correcao (invalido usa o padrao e gera warning) | `25` |
 | `MCP_SERVER_URL` | Endpoint HTTP do MCP Server Kubernetes (via npx) | `http://localhost:3001/mcp` |
 
 ## Infraestrutura (docker-compose)
@@ -84,4 +85,10 @@ Sem essa permissao o log indica o erro 403 e o loop continua tentando a cada cic
 
 Cada lote de eventos vira relatorios no PostgreSQL. Fluxo: dedup por `metadata.uid` -> relatorio `EM_ANALISE` -> agente (somente `kubectl_get`, `kubectl_describe` e `kubectl_logs` do MCP) -> um relatorio `COMPLETO` por problema. Falhas (MCP, API do Claude, resposta sem problemas) deixam o relatorio do lote `INCOMPLETO` e nunca chegam ao coletor. Eventos de relatorios `CORRIGIDO` ou `INCOMPLETO` sao reanalisados na recorrencia. Pre-requisitos: `docker compose up -d`, `uv run alembic upgrade head`, MCP Server no ar e `ANTHROPIC_API_KEY`.
 
-**Seguranca:** a interface web nao tem autenticacao na v1. Restrinja o acesso por rede (VPN, ingress interno); quando o PRD 004 existir, qualquer pessoa com acesso a rede podera disparar correcoes no cluster.
+**Seguranca:** a interface web nao tem autenticacao na v1. Restrinja o acesso por rede (VPN, ingress interno); qualquer pessoa com acesso a rede pode disparar correcoes no cluster (PRD 004).
+
+## Correcao automatica
+
+`POST /reports/{id}/fix` (botao "Executar correcao") aceita relatorios `COMPLETO` ou `FALHA_CORRECAO`, move para `CORRIGINDO` antes de responder (UPDATE condicional atomico; outro status ou clique repetido = 409) e executa o agente em background. O resultado vem do veredito `CORRIGIDO:`/`FALHA:` na resposta (sem veredito = `FALHA_CORRECAO`) e a resposta fica em `correction_result`. `CORRIGINDO` orfao no startup vira `FALHA_CORRECAO` e pode ser reacionado. Requer `ANTHROPIC_API_KEY` e o MCP Server no ar; aplique `uv run alembic upgrade head`.
+
+**Atencao (v1):** o agente recebe TODAS as tools do MCP, inclusive escrita, sem whitelist, dry-run, restricao de namespace ou aprovacao adicional, e a interface nao tem autenticacao. O relatorio que ele executa deriva de texto do cluster processado por um LLM (risco de prompt injection com escrita no cluster). Use somente em cluster descartavel (ex.: kind) e restrinja o acesso a interface por rede.

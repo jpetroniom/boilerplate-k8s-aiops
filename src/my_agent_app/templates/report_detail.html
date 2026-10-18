@@ -8,6 +8,8 @@
         .detail-header form { margin-left: auto; }
         .back-link { color: #94a3b8; text-decoration: none; font-size: 0.875rem; }
         .alert { background: #422006; border: 1px solid #854d0e; color: #fde68a; padding: 0.75rem 1rem; border-radius: 6px; margin-bottom: 1.5rem; }
+        .correction-result { margin-top: 2.5rem; padding-top: 1rem; border-top: 2px solid #334155; }
+        .correction-result > h2 { font-size: 1.25rem; }
         .markdown-body h1 { font-size: 1.5rem; margin: 1.5rem 0 1rem; }
         .markdown-body h2 { font-size: 1.25rem; margin: 1.5rem 0 0.75rem; padding-bottom: 0.25rem; border-bottom: 1px solid #334155; }
         .markdown-body h3 { font-size: 1.05rem; margin: 1.25rem 0 0.5rem; color: #cbd5e1; }
@@ -36,4 +38,10 @@
     {% endif %}
 </div>
 <article class="markdown-body">{{ content | safe }}</article>
+{% if correction_content %}
+<section class="correction-result">
+    <h2>Resultado da Correção</h2>
+    <div class="markdown-body">{{ correction_content | safe }}</div>
+</section>
+{% endif %}
 {% endblock %}

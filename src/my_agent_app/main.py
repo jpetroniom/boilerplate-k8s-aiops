@@ -33,8 +33,12 @@ async def lifespan(app: FastAPI):
             recovered = await queries.recover_orphans(session)
         if recovered:
             logger.warning("%d relatorio(s) EM_ANALISE orfao(s) marcado(s) como INCOMPLETO", recovered)
+        async with sessionmaker() as session:
+            interrupted = await queries.recover_corrections(session)
+        if interrupted:
+            logger.warning("%d correcao(oes) CORRIGINDO interrompida(s) marcada(s) como FALHA_CORRECAO", interrupted)
     except Exception:
-        logger.exception("Nao foi possivel recuperar relatorios EM_ANALISE orfaos no startup")
+        logger.exception("Nao foi possivel recuperar relatorios orfaos (EM_ANALISE/CORRIGINDO) no startup")
 
     collector_task = asyncio.create_task(EventCollector(handler=EventHandler(sessionmaker)).run())
 

@@ -136,3 +136,47 @@ async def test_get_report(sessionmaker):
     async with sessionmaker() as s:
         assert (await q.get_report(s, rid)).id == rid
         assert await q.get_report(s, uuid.uuid4()) is None
+
+
+async def test_begin_correction_accepts_only_completo_and_falha(sessionmaker):
+    ok = [await add(sessionmaker, "COMPLETO", ["a"]), await add(sessionmaker, "FALHA_CORRECAO", ["b"])]
+    bad = [await add(sessionmaker, st, ["c"]) for st in ("EM_ANALISE", "INCOMPLETO", "CORRIGINDO", "CORRIGIDO")]
+    async with sessionmaker() as s:
+        assert [await q.begin_correction(s, r) for r in ok] == [True, True]
+    async with sessionmaker() as s:
+        assert [await q.begin_correction(s, r) for r in bad] == [False] * 4
+    assert [await status_of(sessionmaker, r) for r in ok] == ["CORRIGINDO", "CORRIGINDO"]
+
+
+async def test_begin_correction_concurrent_only_one_wins(sessionmaker):
+    import asyncio
+
+    rid = await add(sessionmaker, "COMPLETO", ["a"])
+
+    async def attempt():
+        async with sessionmaker() as s:
+            return await q.begin_correction(s, rid)
+
+    results = await asyncio.gather(*[attempt() for _ in range(8)])
+    assert results.count(True) == 1
+
+
+async def test_finish_correction_sets_result_only_while_corrigindo(sessionmaker):
+    running = await add(sessionmaker, "CORRIGINDO", ["a"])
+    recovered = await add(sessionmaker, "FALHA_CORRECAO", ["b"])
+    async with sessionmaker() as s:
+        assert await q.finish_correction(s, running, ReportStatus.CORRIGIDO, "CORRIGIDO: ok") is True
+        assert await q.finish_correction(s, recovered, ReportStatus.CORRIGIDO, "x") is False
+    async with sessionmaker() as s:
+        r = await q.get_report(s, running)
+        assert (r.status, r.correction_result) == ("CORRIGIDO", "CORRIGIDO: ok")
+        assert (await q.get_report(s, recovered)).correction_result is None
+
+
+async def test_recover_corrections(sessionmaker):
+    orphan = await add(sessionmaker, "CORRIGINDO", ["a"])
+    other = await add(sessionmaker, "CORRIGIDO", ["b"])
+    async with sessionmaker() as s:
+        assert await q.recover_corrections(s) == 1
+    assert await status_of(sessionmaker, orphan) == "FALHA_CORRECAO"
+    assert await status_of(sessionmaker, other) == "CORRIGIDO"

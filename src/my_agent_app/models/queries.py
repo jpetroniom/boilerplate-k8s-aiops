@@ -91,3 +91,39 @@ async def list_reports(session: AsyncSession) -> list[Report]:
 
 async def get_report(session: AsyncSession, report_id: uuid.UUID) -> Report | None:
     return await session.get(Report, report_id)
+
+
+async def begin_correction(session: AsyncSession, report_id: uuid.UUID) -> bool:
+    """COMPLETO/FALHA_CORRECAO -> CORRIGINDO de forma atomica; so uma chamada concorrente vence."""
+    result = await session.execute(
+        update(Report)
+        .where(
+            Report.id == report_id,
+            Report.status.in_([ReportStatus.COMPLETO.value, ReportStatus.FALHA_CORRECAO.value]),
+        )
+        .values(status=ReportStatus.CORRIGINDO)
+        .returning(Report.id)
+    )
+    won = result.first() is not None
+    await session.commit()
+    return won
+
+
+async def finish_correction(session: AsyncSession, report_id: uuid.UUID, status: ReportStatus, result: str) -> bool:
+    """CORRIGINDO -> CORRIGIDO/FALHA_CORRECAO com o resultado; nao sobrescreve relatorio que saiu de CORRIGINDO."""
+    outcome = await session.execute(
+        update(Report)
+        .where(Report.id == report_id, Report.status == ReportStatus.CORRIGINDO)
+        .values(status=status, correction_result=result)
+    )
+    await session.commit()
+    return outcome.rowcount > 0
+
+
+async def recover_corrections(session: AsyncSession) -> int:
+    """No startup, todo CORRIGINDO e orfao de um restart: vira FALHA_CORRECAO (re-acionavel)."""
+    result = await session.execute(
+        update(Report).where(Report.status == ReportStatus.CORRIGINDO).values(status=ReportStatus.FALHA_CORRECAO)
+    )
+    await session.commit()
+    return result.rowcount

@@ -35,6 +35,7 @@ class Report(Base):
     markdown: Mapped[str] = mapped_column(Text, default="")
     status: Mapped[str] = mapped_column(String(32), index=True)
     event_uids: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list)
+    correction_result: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
