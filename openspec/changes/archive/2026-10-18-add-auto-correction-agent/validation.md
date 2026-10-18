@@ -16,3 +16,20 @@ Ambiente: kind descartável (`kube-news`), PostgreSQL 17 do compose, MCP Server 
 - O Claude real **não** foi exercitado (sem `ANTHROPIC_API_KEY`); a 5.4 foi validada com outro modelo, via `AGENT_MODEL_PROVIDER=gemini`. A conduta do agente com o Claude pode diferir.
 - Nesta execução a aplicação rodou com `KUBECONFIG` inexistente apenas para o coletor não consumir a cota gratuita; o agente de correção usa o MCP Server, que enxerga o cluster normalmente.
 - Falso `FALHA_CORRECAO` por verificação imediata (limitação do PRD) não ocorreu: o agente aguardou o rollout concluir.
+
+## Execução ponta a ponta com o Gemini
+
+Fluxo completo em um único processo, sem intervenção entre as etapas: kind com `manifestos-k8s/` (10 pods `kubenews` em `CrashLoopBackOff` por senha de banco divergente e `nginx` com imagem inexistente, 26 eventos Warning), PostgreSQL, MCP Server real e a aplicação com `AGENT_MODEL_PROVIDER=gemini` (`gemini-3.5-flash`, resolvido para `gemini-3.6-flash`).
+
+| Etapa | Resultado |
+|-------|-----------|
+| Coleta imediata | 26 eventos Warning no startup, em um lote |
+| Análise (PRD 002) | Relatório `EM_ANALISE` (26 uids) por ~85 s, depois 2 relatórios `COMPLETO`: `kubenews` (20 eventos, falha de autenticação no banco) e `nginx` (6 eventos, imagem `ngin:latest`), ambos `CRITICO`, com todas as seções |
+| Interface (PRD 003) | `/reports` lista os dois; o detalhe do `nginx` renderiza o Markdown e exibe "Executar correção" |
+| Correção (PRD 004) | `POST /reports/{id}/fix`: 303, `CORRIGINDO`, `CORRIGIDO` em ~45 s; imagem `nginx:latest`, pod `1/1 Running`; seção "Resultado da Correção" na página. O Gemini repetiu o `patchData` como texto, o MCP recusou e o interceptor devolveu o erro ao modelo, que corrigiu a chamada |
+
+### Limitações observadas
+
+- **Cota gratuita:** o limite diário do plano gratuito é por modelo (20 requisições/dia/projeto). Uma tentativa anterior com `gemini-3.8-flash` terminou `INCOMPLETO` com `429`; a execução acima usou outro modelo, com cota própria.
+- **Relatório redundante após a correção:** no ciclo seguinte (3 min), 3 dos 6 uids do relatório `CORRIGIDO` do `nginx` foram recoletados e, como o spec manda reanalisar eventos de relatório `CORRIGIDO`, geraram um novo relatório `COMPLETO` sobre um problema já resolvido (o agente anotou, nas evidências, que o deployment já estava saudável). O botão "Executar correção" voltaria a aparecer nesse relatório. É a consequência prevista no `design.md` do PRD 002 ("avaliar carência pós-CORRIGIDO"), e uma carência ou o descarte de eventos anteriores à correção reduziria o ruído.
+- Os 10 pods do `kubenews` seguiram em `CrashLoopBackOff` (a correção do `kubenews` não foi tentada nesta execução).
