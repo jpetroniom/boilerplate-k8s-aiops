@@ -17,6 +17,7 @@ DEFAULT_MODELS = {"anthropic": DEFAULT_MODEL, "google_genai": "gemini-flash-late
 PROVIDER_ALIASES = {"gemini": "google_genai", "google": "google_genai", "google-genai": "google_genai"}
 DEFAULT_MAX_ITERATIONS = 25
 DEFAULT_STALE_TIMEOUT_MINUTES = 30
+DEFAULT_CORRECTION_GRACE_MINUTES = 15
 DEFAULT_MCP_SERVER_URL = "http://localhost:3001/mcp"
 READ_TOOLS = ("kubectl_get", "kubectl_describe", "kubectl_logs")
 
@@ -54,6 +55,10 @@ def get_max_iterations() -> int:
 
 def get_stale_timeout_minutes() -> float:
     return _positive_number("ANALYSIS_STALE_TIMEOUT_MINUTES", DEFAULT_STALE_TIMEOUT_MINUTES, float)
+
+
+def get_correction_grace_minutes() -> float:
+    return _positive_number("CORRECTION_GRACE_MINUTES", DEFAULT_CORRECTION_GRACE_MINUTES, float)
 
 
 def get_mcp_server_url() -> str:

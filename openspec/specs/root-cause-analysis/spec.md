@@ -30,11 +30,15 @@ O sistema SHALL ignorar eventos cujo `uid` esteja em qualquer relatório com sta
 - **THEN** nenhuma análise é disparada
 
 ### Requirement: Reanálise de reincidência e de análise incompleta
-O sistema SHALL reanalisar eventos cujo uid conste somente em relatórios `CORRIGIDO` ou `INCOMPLETO`.
+O sistema SHALL reanalisar eventos cujo uid conste somente em relatórios `CORRIGIDO` ou `INCOMPLETO`, exceto eventos de relatório `CORRIGIDO` concluído há menos que a carência pós-correção (`CORRECTION_GRACE_MINUTES`, padrão 15), que MUST ser ignorados para não gerar relatório sobre problema recém-resolvido.
 
 #### Scenario: Reincidência após correção
-- **WHEN** um evento reaparece e seu uid só consta em relatório `CORRIGIDO`
+- **WHEN** um evento reaparece após a carência e seu uid só consta em relatório `CORRIGIDO`
 - **THEN** o evento é reanalisado e gera novo relatório
+
+#### Scenario: Recoleta dentro da carência pós-correção
+- **WHEN** um evento reaparece antes de a carência terminar e seu uid só consta em relatório `CORRIGIDO`
+- **THEN** o evento é ignorado e nenhum relatório é criado
 
 #### Scenario: Recorrência após análise incompleta
 - **WHEN** um evento reaparece e seu uid só consta em relatório `INCOMPLETO`

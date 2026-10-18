@@ -22,6 +22,17 @@ def test_defaults(monkeypatch):
     assert a.get_mcp_server_url() == "http://localhost:3001/mcp"
 
 
+def test_correction_grace_config(monkeypatch, caplog):
+    monkeypatch.delenv("CORRECTION_GRACE_MINUTES", raising=False)
+    assert a.get_correction_grace_minutes() == 15
+    monkeypatch.setenv("CORRECTION_GRACE_MINUTES", "5")
+    assert a.get_correction_grace_minutes() == 5
+    monkeypatch.setenv("CORRECTION_GRACE_MINUTES", "x")
+    with caplog.at_level(logging.WARNING):
+        assert a.get_correction_grace_minutes() == 15
+    assert "CORRECTION_GRACE_MINUTES" in caplog.text
+
+
 def test_invalid_values_warn(monkeypatch, caplog):
     monkeypatch.setenv("ANALYSIS_STALE_TIMEOUT_MINUTES", "x")
     with caplog.at_level(logging.WARNING):

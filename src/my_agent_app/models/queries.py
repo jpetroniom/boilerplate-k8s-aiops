@@ -35,11 +35,35 @@ async def find_active_uids(session: AsyncSession, uids: list[str]) -> set[str]:
     return found & set(uids)
 
 
-async def filter_new_events(session: AsyncSession, events: list[dict], stale_timeout_minutes: float) -> list[dict]:
-    """Recupera estagnados e devolve apenas os eventos que ainda nao estao em tratamento."""
+async def find_recently_fixed_uids(session: AsyncSession, uids: list[str], grace_minutes: float) -> set[str]:
+    """Uids de relatorios CORRIGIDO concluidos ha menos de `grace_minutes` (carencia pos-correcao)."""
+    if not uids or grace_minutes <= 0:
+        return set()
+    threshold = datetime.now(UTC) - timedelta(minutes=grace_minutes)
+    rows = await session.execute(
+        select(Report.event_uids).where(
+            Report.status == ReportStatus.CORRIGIDO,
+            Report.updated_at > threshold,
+            Report.event_uids.overlap(uids),
+        )
+    )
+    found: set[str] = set()
+    for (event_uids,) in rows:
+        found.update(event_uids)
+    return found & set(uids)
+
+
+async def filter_new_events(
+    session: AsyncSession, events: list[dict], stale_timeout_minutes: float, grace_minutes: float = 0
+) -> list[dict]:
+    """Recupera estagnados e devolve apenas os eventos que ainda nao estao em tratamento.
+
+    Eventos de relatorio CORRIGIDO dentro da carencia (`grace_minutes`) tambem sao ignorados.
+    """
     await mark_stale_reports(session, stale_timeout_minutes)
-    active = await find_active_uids(session, [e["uid"] for e in events])
-    return [e for e in events if e["uid"] not in active]
+    uids = [e["uid"] for e in events]
+    skip = await find_active_uids(session, uids) | await find_recently_fixed_uids(session, uids, grace_minutes)
+    return [e for e in events if e["uid"] not in skip]
 
 
 async def create_batch_report(session: AsyncSession, event_uids: list[str]) -> uuid.UUID:

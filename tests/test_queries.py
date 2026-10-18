@@ -10,7 +10,7 @@ def ev(uid):
     return {"uid": uid}
 
 
-async def add(sm, status, uids, age_minutes=0):
+async def add(sm, status, uids, age_minutes=0, updated_minutes_ago=0):
     async with sm() as s:
         r = Report(markdown="m", status=status, event_uids=uids)
         s.add(r)
@@ -18,6 +18,13 @@ async def add(sm, status, uids, age_minutes=0):
         if age_minutes:
             await s.execute(
                 update(Report).where(Report.id == r.id).values(created_at=datetime.now(UTC) - timedelta(minutes=age_minutes))
+            )
+            await s.commit()
+        if updated_minutes_ago:
+            await s.execute(
+                update(Report)
+                .where(Report.id == r.id)
+                .values(updated_at=datetime.now(UTC) - timedelta(minutes=updated_minutes_ago))
             )
             await s.commit()
         return r.id
@@ -45,6 +52,32 @@ async def test_corrigido_and_incompleto_are_reanalyzed(sessionmaker):
     await add(sessionmaker, "INCOMPLETO", ["i"])
     async with sessionmaker() as s:
         assert await q.filter_new_events(s, [ev("c"), ev("i")], 30) == [ev("c"), ev("i")]
+
+
+async def test_recently_fixed_is_ignored_within_grace(sessionmaker):
+    await add(sessionmaker, "CORRIGIDO", ["f"], updated_minutes_ago=5)
+    async with sessionmaker() as s:
+        assert await q.filter_new_events(s, [ev("f")], 30, grace_minutes=15) == []
+
+
+async def test_fixed_after_grace_is_reanalyzed(sessionmaker):
+    await add(sessionmaker, "CORRIGIDO", ["f"], updated_minutes_ago=20)
+    async with sessionmaker() as s:
+        assert await q.filter_new_events(s, [ev("f")], 30, grace_minutes=15) == [ev("f")]
+
+
+async def test_grace_does_not_apply_to_incompleto(sessionmaker):
+    await add(sessionmaker, "INCOMPLETO", ["i"], updated_minutes_ago=1)
+    async with sessionmaker() as s:
+        assert await q.filter_new_events(s, [ev("i")], 30, grace_minutes=15) == [ev("i")]
+
+
+async def test_finish_correction_starts_grace(sessionmaker):
+    rid = await add(sessionmaker, "CORRIGINDO", ["g"], updated_minutes_ago=60)
+    async with sessionmaker() as s:
+        await q.finish_correction(s, rid, ReportStatus.CORRIGIDO, "CORRIGIDO: ok")
+    async with sessionmaker() as s:
+        assert await q.filter_new_events(s, [ev("g")], 30, grace_minutes=15) == []
 
 
 async def test_old_corrigido_plus_active_report_is_ignored(sessionmaker):

@@ -36,7 +36,12 @@ class EventHandler:
     async def _process(self, events: list[dict]) -> None:
         try:
             async with self._sessionmaker() as session:
-                new_events = await queries.filter_new_events(session, events, analysis.get_stale_timeout_minutes())
+                new_events = await queries.filter_new_events(
+                    session,
+                    events,
+                    analysis.get_stale_timeout_minutes(),
+                    analysis.get_correction_grace_minutes(),
+                )
             if not new_events:
                 logger.info("Lote de %d eventos ignorado: todos ja estao em tratamento", len(events))
                 return
