@@ -21,8 +21,8 @@ docker compose up -d
 # Requer Node.js/npx instalado e kubeconfig em ~/.kube/config
 ENABLE_UNSAFE_STREAMABLE_HTTP_TRANSPORT=1 PORT=3001 npx mcp-server-kubernetes
 
-# Aplicar migrations do banco de dados (apos criar modelos e configurar Alembic)
-# uv run alembic upgrade head
+# Aplicar migrations do banco de dados (cria a tabela reports)
+uv run alembic upgrade head
 ```
 
 A aplicacao roda localmente via `uv`; o Docker e usado apenas para o banco de dados.
@@ -34,16 +34,13 @@ Testes: `uv run pytest` (pytest + pytest-asyncio, em `tests/`). Nao ha linter co
 
 O codigo da aplicacao fica em `src/my_agent_app/` e e empacotado via hatchling (`pyproject.toml`).
 
+- **Models** (`models/`) — `Report` (tabela `reports`: id UUID, markdown, status, `event_uids TEXT[]` com GIN, timestamps), enum `ReportStatus` e queries async (deduplicacao, relatorio do lote, swap condicional, recuperacao de orfaos). Migrations em `migrations/` (Alembic async)
+- **Agents** (`agents/`) — `analysis.py` (config, prompt, tools MCP de leitura, agente `create_agent` + `ModelCallLimitMiddleware`) e `report_parser.py` (Markdown da resposta -> um relatorio por problema)
 - **Database** (`database.py`) — Engine async SQLAlchemy + asyncpg, configurado via `DATABASE_URL`
 - **API** (`api/router.py`) — Health check
 - **Interface Web** (`web/router.py`) — Pagina inicial. Templates Jinja2 em `src/my_agent_app/templates/`
 
-- **Collector** (`collector/`) — Coleta periodica de eventos Warning do cluster, iniciada pelo `lifespan` do FastAPI. `client.py` (autenticacao in-cluster/kubeconfig e listagem em `asyncio.to_thread`), `transform.py` (recencia, filtro e contrato de saida; funcoes puras), `handler.py` (`EventHandler`, placeholder que imprime no stdout) e `loop.py` (`EventCollector`: coleta imediata no startup, marca d'agua em memoria e despacho fire-and-forget)
-
-### Modulos placeholder (a implementar)
-
-- **Agents** (`agents/`) — Agentes LangChain + MCP Server
-- **Models** (`models/`) — Modelos SQLAlchemy e queries
+- **Collector** (`collector/`) — Coleta periodica de eventos Warning do cluster, iniciada pelo `lifespan` do FastAPI. `client.py` (autenticacao in-cluster/kubeconfig e listagem em `asyncio.to_thread`), `transform.py` (recencia, filtro e contrato de saida; funcoes puras), `handler.py` (`EventHandler`: pipeline de analise do PRD 002 — dedup, relatorio `EM_ANALISE`, agente, relatorios por problema) e `loop.py` (`EventCollector`: coleta imediata no startup, marca d'agua em memoria e despacho fire-and-forget)
 
 ## Variaveis de ambiente
 
@@ -52,6 +49,9 @@ O codigo da aplicacao fica em `src/my_agent_app/` e e empacotado via hatchling (
 | `ANTHROPIC_API_KEY` | Chave de API da Anthropic | (obrigatorio) |
 | `DATABASE_URL` | Connection string PostgreSQL async | `postgresql+asyncpg://aiops:aiops123@localhost:5432/aiops_k8s` |
 | `EVENT_COLLECTION_INTERVAL_MINUTES` | Intervalo da coleta de eventos Warning do cluster, em minutos (valor invalido usa o padrao e gera warning) | `3` |
+| `AGENT_MODEL_NAME` | Modelo Claude do agente de analise | `claude-haiku-4-5` |
+| `AGENT_MAX_ITERATIONS` | Maximo de chamadas ao modelo por analise (invalido usa o padrao e gera warning) | `25` |
+| `ANALYSIS_STALE_TIMEOUT_MINUTES` | Minutos ate um relatorio `EM_ANALISE` ser marcado `INCOMPLETO` na deduplicacao; manter acima do pior caso de runtime do agente | `30` |
 | `MCP_SERVER_URL` | Endpoint HTTP do MCP Server Kubernetes (via npx) | `http://localhost:3001/mcp` |
 
 ## Infraestrutura (docker-compose)
@@ -79,3 +79,7 @@ rules:
 ```
 
 Sem essa permissao o log indica o erro 403 e o loop continua tentando a cada ciclo.
+
+## Analise de causa raiz
+
+Cada lote de eventos vira relatorios no PostgreSQL. Fluxo: dedup por `metadata.uid` -> relatorio `EM_ANALISE` -> agente (somente `kubectl_get`, `kubectl_describe` e `kubectl_logs` do MCP) -> um relatorio `COMPLETO` por problema. Falhas (MCP, API do Claude, resposta sem problemas) deixam o relatorio do lote `INCOMPLETO` e nunca chegam ao coletor. Eventos de relatorios `CORRIGIDO` ou `INCOMPLETO` sao reanalisados na recorrencia. Pre-requisitos: `docker compose up -d`, `uv run alembic upgrade head`, MCP Server no ar e `ANTHROPIC_API_KEY`.

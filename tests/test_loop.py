@@ -4,7 +4,6 @@ import logging
 import pytest
 from conftest import iso, make_event
 
-from my_agent_app.collector.handler import EventHandler
 from my_agent_app.collector.loop import EventCollector, get_interval_minutes
 
 
@@ -104,16 +103,3 @@ async def test_run_cancel_cancels_pending_tasks():
     with pytest.raises(asyncio.CancelledError):
         await run
     assert not c._tasks
-
-
-async def test_handler_exception_not_propagated(monkeypatch, capsys):
-    def boom(*a, **k):
-        raise RuntimeError("x")
-
-    monkeypatch.setattr("my_agent_app.collector.handler.json.dumps", boom)
-    await EventHandler().handle([{"uid": "1"}])
-
-
-async def test_handler_prints(capsys):
-    await EventHandler().handle([{"uid": "1"}])
-    assert '"uid": "1"' in capsys.readouterr().out
