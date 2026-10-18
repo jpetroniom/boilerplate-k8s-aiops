@@ -28,7 +28,7 @@
 Cenário: kind local, PostgreSQL do compose, MCP Server via `npx` e os manifestos de `manifestos-k8s/`. Os passos que chamam o Claude exigem `ANTHROPIC_API_KEY`; sem ela, registrar o passo como pendente em vez de marcá-lo.
 
 - [x] 5.1 Subir PostgreSQL e MCP Server (`ENABLE_UNSAFE_STREAMABLE_HTTP_TRANSPORT=1 PORT=3001 npx mcp-server-kubernetes`) e verificar que a lista de tools do MCP contém `kubectl_get`, `kubectl_describe` e `kubectl_logs`
-- [ ] 5.2 Aplicar `manifestos-k8s/` no kind e verificar que a aplicação cria o relatório `EM_ANALISE` e depois relatórios `COMPLETO` com `event_uids` no banco
-- [ ] 5.3 Verificar que os relatórios seguem a estrutura (resumo, severidade, causa raiz, evidências, solução, comando sugerido) e que o próximo ciclo não reanalisa os uids já vinculados
+- [x] 5.2 Aplicar `manifestos-k8s/` no kind e verificar que a aplicação cria o relatório `EM_ANALISE` e depois relatórios `COMPLETO` com `event_uids` no banco
+- [x] 5.3 Verificar que os relatórios seguem a estrutura (resumo, severidade, causa raiz, evidências, solução, comando sugerido) e que o próximo ciclo não reanalisa os uids já vinculados
 - [x] 5.4 Verificar a resiliência: parar o MCP Server e confirmar relatório `INCOMPLETO` e aplicação de pé; reiniciar a aplicação com um `EM_ANALISE` órfão e confirmar `INCOMPLETO`
 - [x] 5.5 Remover os recursos de teste e registrar o resultado das validações em `validation.md` da change

@@ -28,5 +28,5 @@ Cenário: kind descartável, PostgreSQL do compose, MCP Server via `npx`, aplica
 - [x] 5.1 Com modelo roteirizado e o MCP real, aplicar `manifestos-k8s/nginx.yaml` no kind, inserir um relatório `COMPLETO` com o comando de correção e executar `POST /reports/{id}/fix`; verificar `CORRIGINDO` imediato, 303, a ação aplicada no cluster, o status final e a seção "Resultado da Correção"
 - [x] 5.2 Verificar o 409 (clique repetido durante `CORRIGINDO` e status inválidos), o 404 e que a página exibe a mensagem
 - [x] 5.3 Verificar a resiliência: MCP parado durante o fix resulta em `FALHA_CORRECAO`; reiniciar a aplicação com `CORRIGINDO` órfão resulta em `FALHA_CORRECAO` e o botão volta a aparecer
-- [ ] 5.4 Executar a correção com o Claude real sobre o `nginx` com imagem inexistente e confirmar `CORRIGIDO` com o recurso saudável (requer `ANTHROPIC_API_KEY`)
+- [x] 5.4 Executar a correção com o Claude real sobre o `nginx` com imagem inexistente e confirmar `CORRIGIDO` com o recurso saudável (requer `ANTHROPIC_API_KEY`)
 - [x] 5.5 Remover os recursos de teste e registrar o resultado em `validation.md` da change
