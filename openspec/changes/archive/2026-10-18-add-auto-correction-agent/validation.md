@@ -47,3 +47,16 @@ Cenário: os 10 pods do `kubenews` em falha porque `DB_PASSWORD=pg123` no deploy
 | Erros de tool | 4 chamadas rejeitadas pelo MCP (`patchData` como texto em `kubectl_patch`, uma falha em `kubectl_apply` e outra em `kubectl_generic`); o interceptor devolveu cada erro ao modelo, que tentou outra abordagem e concluiu |
 
 Limitação: foi um único caso; o comportamento do agente com outros modelos (inclusive o Claude) pode diferir, e o PRD mantém o acesso irrestrito ao cluster sem whitelist nem dry-run.
+
+## Carência pós-`CORRIGIDO` no kind com o Gemini
+
+Cenário: kind com só o `nginx` (imagem inexistente, 3 eventos Warning), MCP real e a aplicação com `gemini-3.7-flash`, coleta a cada 1 min e `CORRECTION_GRACE_MINUTES=4`. A recoleta total dos eventos foi forçada reiniciando a aplicação (a marca d'água é em memória, então a coleta do startup devolve todos os eventos).
+
+| Etapa | Resultado |
+|-------|-----------|
+| Análise | Relatório `COMPLETO` com os 3 uids (imagem inexistente) |
+| Correção | `POST /fix` → 303 → `CORRIGIDO` às 00:01:54; imagem `nginx:latest`, pod `1/1 Running` |
+| Recoleta dentro da carência (00:02:12, ~20 s após a correção) | Log "Lote de 3 eventos ignorado: todos ja estao em tratamento"; nenhum relatório novo (continuou 1 `CORRIGIDO`) |
+| Recoleta após a carência (~00:06:30, depois de 00:05:54) | Os mesmos 3 uids foram reanalisados e geraram novo relatório `COMPLETO` (00:06:49), como o PRD 002 manda para reincidência |
+
+Observações: a mensagem de log diz "ja estao em tratamento" também para o descarte por carência. A execução precisou de tentativas extras por falhas do Gemini (cota diária `429` no `gemini-3.5-flash`, `503` transitório no `gemini-3.7-flash`) e porque o MCP ainda não estava no ar na primeira coleta; nenhuma delas tem relação com a carência.
