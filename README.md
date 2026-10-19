@@ -3,8 +3,9 @@
 Boilerplate para criar agentes inteligentes com:
 
 - **FastAPI** (async) como backend
-- **LangChain + Claude Sonnet** como framework de agentes (padrao ReAct)
-- **MCP Server** para integracao com ferramentas externas
+- **LangChain** como framework de agentes (Claude por padrao; Gemini opcional)
+- **MCP Server Kubernetes** para o agente ler e alterar o cluster
+- **Coleta de eventos Warning** do cluster, analise de causa raiz e correcao automatica (PRDs em `docs/prds/`)
 - **PostgreSQL** + SQLAlchemy async para persistencia
 - **Alembic** para migrations
 - **Jinja2** para interface web com dark theme
@@ -38,6 +39,8 @@ cp .env.example .env
 # Edite .env com suas configuracoes (ANTHROPIC_API_KEY, etc)
 ```
 
+Para usar o Gemini (ha cota gratuita) em vez do Claude, defina `AGENT_MODEL_PROVIDER=gemini` e `GOOGLE_API_KEY`. Os prompts foram escritos para o Claude; com outros modelos a qualidade do diagnostico e o formato da resposta podem variar. A lista completa de variaveis esta no `CLAUDE.md`.
+
 ### 4. Subir o banco de dados
 
 O Docker provisiona **apenas o banco** (PostgreSQL + pgAdmin):
@@ -46,10 +49,11 @@ O Docker provisiona **apenas o banco** (PostgreSQL + pgAdmin):
 docker compose up -d
 ```
 
-### 5. Instalar dependencias
+### 5. Instalar dependencias e aplicar as migrations
 
 ```bash
 uv sync
+uv run alembic upgrade head
 ```
 
 ### 6. Subir o MCP Server (via npx)
@@ -70,6 +74,17 @@ A aplicacao roda localmente via `uv`:
 uv run uvicorn meu_agente.main:app --host 0.0.0.0 --port 8000
 ```
 
+Abra `http://localhost:8000/reports` para ver os relatorios. O coletor roda junto com a aplicacao (coleta imediata no startup e depois a cada `EVENT_COLLECTION_INTERVAL_MINUTES`) e usa o kubeconfig local ou a configuracao in-cluster.
+
+## Fluxo
+
+1. **Coleta** (PRD 001): lista os eventos Warning do cluster periodicamente.
+2. **Analise** (PRD 002): um agente com tools MCP somente de leitura investiga o lote e grava um relatorio `COMPLETO` por problema (status `EM_ANALISE` durante a analise, `INCOMPLETO` se falhar). Eventos de relatorio `CORRIGIDO` recem-concluido ficam em carencia (`CORRECTION_GRACE_MINUTES`) para nao gerar relatorio redundante.
+3. **Interface** (PRD 003): `GET /reports` e `GET /reports/{id}` exibem os relatorios (Markdown sanitizado).
+4. **Correcao** (PRD 004): o botao "Executar correcao" (`POST /reports/{id}/fix`) aciona um agente com **todas** as tools do MCP, inclusive escrita; o resultado vira `CORRIGIDO` ou `FALHA_CORRECAO`.
+
+> **Seguranca:** a interface nao tem autenticacao e o agente de correcao escreve no cluster sem whitelist, dry-run nem aprovacao. Use somente em cluster descartavel (ex.: kind) e restrinja o acesso por rede.
+
 ## Estrutura
 
 ```
@@ -77,12 +92,18 @@ src/my_agent_app/
 ├── main.py              # FastAPI + lifespan
 ├── database.py          # SQLAlchemy async engine
 ├── api/router.py        # Health check
-├── web/router.py        # Pagina inicial (Jinja2)
+├── web/                 # Rotas (/, /reports, /reports/{id}, /fix) e renderizacao do Markdown
 ├── templates/           # Templates HTML (dark theme)
-├── agents/              # (placeholder) Agentes LangChain + MCP
-├── collector/           # (placeholder) Loop de coleta de dados
-└── models/              # (placeholder) Modelos e queries
+├── agents/              # Agentes de analise e de correcao, parser dos relatorios
+├── collector/           # Coleta de eventos Warning, transformacao e pipeline de analise
+└── models/              # Report, status e queries
+migrations/              # Alembic async (reports, correction_result)
+tests/                   # pytest (PostgreSQL real, modelo e tools falsos)
+docs/prds/               # PRDs 001-004
+openspec/                # Specs e changes arquivadas (com validation.md)
 ```
+
+Testes: `uv run pytest`.
 
 ## Stack
 
@@ -91,8 +112,8 @@ src/my_agent_app/
 | FastAPI + Uvicorn | Backend async |
 | SQLAlchemy 2.0 + asyncpg | ORM async com PostgreSQL |
 | Alembic | Migrations |
-| LangChain + Claude Sonnet | Framework de agentes IA |
-| MCP Server | Integracao com ferramentas externas |
+| LangChain (Claude ou Gemini) | Framework de agentes IA |
+| MCP Server Kubernetes | Tools de leitura e escrita no cluster |
 | Jinja2 | Interface web server-side |
 | Docker Compose | Banco de dados local (PostgreSQL + pgAdmin) |
 | Node.js + npx | Runtime do MCP Server Kubernetes (transport HTTP) |
